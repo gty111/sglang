@@ -492,6 +492,10 @@ class ServerArgs:
     pdmux_config_path: Optional[str] = None
     sm_group_num: int = 8
 
+    # epd
+    is_mm_embedding: bool = False
+    temp_only_language_model: bool = False
+
     def get_attention_backends(server_args):
         prefill_attention_backend_str = (
             server_args.prefill_attention_backend
@@ -576,6 +580,9 @@ class ServerArgs:
 
         # Handle any other necessary validations.
         self._handle_other_validations()
+    
+        # Handle EPD arguments.
+        self._handle_epd_args()
 
     def _handle_deprecated_args(self):
         # handle deprecated tool call parsers
@@ -1398,6 +1405,11 @@ class ServerArgs:
                 logger.warning(
                     "NCCL_ALGO is set to 'allreduce:tree' and custom all reduce is disabled for deterministic inference when TP size > 1."
                 )
+
+    def _handle_epd_args(self):
+        if self.is_mm_embedding:
+            self.skip_server_warmup = True
+            logger.warning("Skip server warmup for mm embedding")
 
     def _handle_other_validations(self):
         pass
@@ -3093,6 +3105,18 @@ class ServerArgs:
             "--config",
             type=str,
             help="Read CLI options from a config file. Must be a YAML file with configuration options.",
+        )
+
+        # mm encoder config
+        parser.add_argument(
+            "--is-mm-embedding",
+            action="store_true",
+            help="Whether embedding mm item only",
+        )
+        parser.add_argument(
+            "--temp-only-language-model",
+            action="store_true",
+            help="Whether only use language model for inference",
         )
 
     @classmethod

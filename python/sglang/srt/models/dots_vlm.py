@@ -30,9 +30,11 @@ from sglang.srt.managers.mm_utils import (
     general_mm_embed_routine,
 )
 from sglang.srt.managers.schedule_batch import MultimodalDataItem, MultimodalInputs
+from sglang.srt.layers.pooler import EmbeddingPoolerOutput
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_loader.weight_utils import default_weight_loader
 from sglang.srt.models.deepseek_v2 import DeepseekV2ForCausalLM
+from sglang.srt.server_args import get_global_server_args
 
 from .dots_vlm_vit import DotsVisionTransformer
 
@@ -49,12 +51,21 @@ class DotsVLMForCausalLM(nn.Module):
         self.image_token_id = config.im_span_id
         self.video_token_id = config.video_span_id
 
-        self.language_model = DeepseekV2ForCausalLM(
-            config.language_config, quant_config
-        )
+        self.load_vision_only = get_global_server_args().is_mm_embedding
+        self.load_language_only = get_global_server_args().temp_only_language_model
+
+        if not self.load_vision_only:
+            self.language_model = DeepseekV2ForCausalLM(
+                config.language_config, quant_config
+            )
+        else:
+            self.language_model = None
 
         # Initialize vision tower (matching transformers naming for weight compatibility)
-        self.vision_tower = DotsVisionTransformer(config.vision_config)
+        if not self.load_language_only:
+            self.vision_tower = DotsVisionTransformer(config.vision_config)
+        else:
+            self.vision_tower = None
 
     def _pad_vit_attn_dummy_heads(self, name: str, loaded_weight: torch.Tensor):
         """pad attn qkv weights for dummy heads"""
@@ -95,10 +106,10 @@ class DotsVLMForCausalLM(nn.Module):
         language_weights = []
 
         for name, loaded_weight in weights:
-            if name.startswith("vision_tower."):
+            if name.startswith("vision_tower.") and not self.load_language_only:
                 vision_name = name.replace(r"attn.qkv.", r"attn.qkv_proj.")
                 vision_weights.append((vision_name, loaded_weight))
-            else:
+            elif not self.load_vision_only:
                 # All other weights go to language model
                 language_weights.append((name, loaded_weight))
 
@@ -167,7 +178,10 @@ class DotsVLMForCausalLM(nn.Module):
             forward_batch=forward_batch,
             multimodal_model=self,
             language_model=self.language_model,
+            only_mm_embeddings=self.load_vision_only,
         )
+        if self.load_vision_only:
+            return EmbeddingPoolerOutput(embeddings=hidden_states[0])
         return hidden_states
 
 

@@ -265,6 +265,7 @@ class Qwen2_5VLImageProcessor(SGLangBaseProcessor):
                 await preprocess_video(video) for video in base_output.videos
             ]
 
+        # adu: base output.input_text 每张图片对应一个 pad token，经过 process_and_combine_mm_data 之后包含 x 个 pad token
         mm_items, input_ids, ret = self.process_and_combine_mm_data(
             base_output, self.mm_tokens
         )

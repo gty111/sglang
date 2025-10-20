@@ -93,7 +93,6 @@ class ModelConfig:
         ] = None,  # TODO: remove this, it is not a model config
         model_impl: Union[str, ModelImpl] = ModelImpl.AUTO,
         sampling_defaults: str = "openai",
-        is_mm_embedding: bool = False,
     ) -> None:
         # Parse args
         self.model_path = model_path
@@ -103,7 +102,6 @@ class ModelConfig:
         self.is_draft_model = is_draft_model
         self.model_impl = model_impl
         self.sampling_defaults = sampling_defaults
-        self.is_mm_embedding = is_mm_embedding
 
         # Get hf config
         self._maybe_pull_model_tokenizer_from_remote()
@@ -161,7 +159,7 @@ class ModelConfig:
                 )
             )
         self.is_generation = is_generation_model(
-            self.hf_config.architectures, is_embedding or is_mm_embedding
+            self.hf_config.architectures, is_embedding
         )
         self.is_multimodal = enable_multimodal and is_multimodal_model(
             self.hf_config.architectures
@@ -221,7 +219,6 @@ class ModelConfig:
             hybrid_kvcache_ratio=server_args.hybrid_kvcache_ratio,
             model_impl=server_args.model_impl,
             sampling_defaults=server_args.sampling_defaults,
-            is_mm_embedding=server_args.is_mm_embedding,
             **kwargs,
         )
 

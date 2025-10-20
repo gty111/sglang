@@ -37,14 +37,13 @@ from sglang.srt.layers.activation import QuickGELU
 from sglang.srt.layers.attention.vision import VisionAttention
 from sglang.srt.layers.linear import ColumnParallelLinear, RowParallelLinear
 from sglang.srt.layers.logits_processor import LogitsProcessor
-from sglang.srt.layers.pooler import EmbeddingPoolerOutput, Pooler, PoolingType
+from sglang.srt.layers.pooler import Pooler, PoolingType
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.vocab_parallel_embedding import ParallelLMHead
 from sglang.srt.managers.mm_utils import (
     MultiModalityDataPaddingPatternMultimodalTokens,
     general_mm_embed_routine,
 )
-from sglang.srt.server_args import get_global_server_args
 from sglang.srt.managers.schedule_batch import MultimodalDataItem, MultimodalInputs
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.model_loader.weight_utils import default_weight_loader
@@ -452,27 +451,18 @@ class Qwen2VLForConditionalGeneration(nn.Module):
         super().__init__()
 
         self.config = config
+        self.visual = Qwen2VisionTransformer(
+            config.vision_config,
+            norm_eps=getattr(config, "rms_norm_eps", 1e-6),
+            # NOTE: Qwen2-VL vision encoder currently supports BitsAndBytes 4-bit quantization.
+            # Other quantization methods (e.g., GPTQ, AWQ) are untested and may not be supported.
+            quant_config=quant_config,
+            prefix=add_prefix("visual", prefix),
+        )
 
-        self.load_vision_only = get_global_server_args().is_mm_embedding
-        self.load_language_only = get_global_server_args().temp_only_language_model
-
-        self.visual = None
-        if not self.load_language_only:
-            self.visual = Qwen2VisionTransformer(
-                config.vision_config,
-                norm_eps=getattr(config, "rms_norm_eps", 1e-6),
-                # NOTE: Qwen2-VL vision encoder currently supports BitsAndBytes 4-bit quantization.
-                # Other quantization methods (e.g., GPTQ, AWQ) are untested and may not be supported.
-                quant_config=quant_config,
-                prefix=add_prefix("visual", prefix),
-            )
-
-
-        self.model = None
-        if not self.load_vision_only:
-            self.model = Qwen2Model(
-                config, quant_config, prefix=add_prefix("model", prefix)
-            )
+        self.model = Qwen2Model(
+            config, quant_config, prefix=add_prefix("model", prefix)
+        )
 
         if config.tie_word_embeddings:
             self.lm_head = self.model.embed_tokens
@@ -561,10 +551,7 @@ class Qwen2VLForConditionalGeneration(nn.Module):
             language_model=self.model,
             multimodal_model=self,
             positions=positions,
-            only_mm_embeddings=self.load_vision_only,
         )
-        if self.load_vision_only:
-            return EmbeddingPoolerOutput(embeddings=hidden_states[0])
 
         if get_embedding:
             return self.pooler(hidden_states, forward_batch)
@@ -584,10 +571,6 @@ class Qwen2VLForConditionalGeneration(nn.Module):
         ]
         params_dict = dict(self.named_parameters(remove_duplicate=False))
         for name, loaded_weight in weights:
-            if self.load_language_only and "visual" in name:
-                continue
-            if self.load_vision_only and "visual" not in name:
-                continue
             if "rotary_emb.inv_freq" in name:
                 continue
             if self.config.tie_word_embeddings and "lm_head.weight" in name:

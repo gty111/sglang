@@ -581,7 +581,7 @@ class TokenizerManager(TokenizerCommunicatorMixin):
                     "accept text prompts. Please provide input_ids or re-initialize "
                     "the engine with skip_tokenizer_init=False."
                 )
-            # TODO: 无 input text 会 raise
+
             input_ids, token_type_ids = await self._tokenize_texts(
                 input_text, is_cross_encoder_request
             )
@@ -591,7 +591,6 @@ class TokenizerManager(TokenizerCommunicatorMixin):
                 obj.image_data = [obj.image_data]
             if not isinstance(obj.audio_data, list) and obj.audio_data:
                 obj.audio_data = [obj.audio_data]
-            # TODO: input_text 如何没有 image token id 会过滤掉图片，这里要改下处理逻辑
             mm_inputs: Dict = await self.mm_processor.process_mm_data_async(
                 image_data=obj.image_data,
                 audio_data=obj.audio_data,

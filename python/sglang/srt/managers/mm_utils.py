@@ -508,7 +508,6 @@ def embed_mm_inputs(
     ] = None,
     placeholder_tokens: dict[Modality, List[int]] = None,
     use_deepstack: bool = False,
-    only_mm_embeddings: bool = False,
 ) -> Optional[torch.Tensor]:
     """
     Embed multimodal inputs and integrate them with text token embeddings.
@@ -520,7 +519,6 @@ def embed_mm_inputs(
         input_ids: Input token IDs tensor
         input_embedding: Embedding layer for text tokens
         placeholder_tokens: Token IDs for multimodal placeholders (uses pad_values if None)
-        only_mm_embeddings: Whether to only return mm embeddings
 
     Returns:
         Combined embedding tensor with multimodal content integrated
@@ -590,9 +588,6 @@ def embed_mm_inputs(
             embeddings += [embedding]
             masks += [mask]
 
-    if only_mm_embeddings:
-        return embeddings, other_info
-
     # 3. Get input embeddings
     vocab_size = input_embedding.num_embeddings
     # Important: clamp after getting original multimodal regions
@@ -646,7 +641,6 @@ def general_mm_embed_routine(
     ] = None,
     placeholder_tokens: Optional[dict[Modality, List[int]]] = None,
     use_deepstack: bool = False,
-    only_mm_embeddings: bool = False,
     **kwargs,
 ) -> torch.Tensor:
     """
@@ -664,11 +658,8 @@ def general_mm_embed_routine(
     Returns:
         Hidden states from language model forward pass
     """
-    if only_mm_embeddings:
-        embed_tokens = None
-    else:
-        assert hasattr(language_model, "get_input_embeddings")
-        embed_tokens = language_model.get_input_embeddings()
+    assert hasattr(language_model, "get_input_embeddings")
+    embed_tokens = language_model.get_input_embeddings()
     if (
         not forward_batch.forward_mode.is_decode()
         and not forward_batch.forward_mode.is_target_verify()
@@ -697,7 +688,6 @@ def general_mm_embed_routine(
             data_embedding_func_mapping=data_embedding_funcs,
             placeholder_tokens=placeholder_tokens,
             use_deepstack=use_deepstack,
-            only_mm_embeddings=only_mm_embeddings,
         )
         # add for qwen3_vl deepstack
         if use_deepstack:
@@ -706,11 +696,7 @@ def general_mm_embed_routine(
         # just being defensive here
         forward_batch.mm_inputs = None
     else:
-        assert embed_tokens is not None
         inputs_embeds = embed_tokens(input_ids)
-
-    if only_mm_embeddings:
-        return inputs_embeds
 
     hidden_states = language_model(
         input_ids=None,

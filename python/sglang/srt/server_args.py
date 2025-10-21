@@ -201,6 +201,10 @@ class ServerArgs:
     skip_server_warmup: bool = False
     warmups: Optional[str] = None
     nccl_port: Optional[int] = None
+    
+    # Encode prefill disaggregation
+    mm_only: bool = False
+    language_only: bool = False
 
     # Quantization and data type
     dtype: str = "auto"
@@ -1545,6 +1549,17 @@ class ServerArgs:
             type=int,
             default=ServerArgs.nccl_port,
             help="The port for NCCL distributed environment setup. Defaults to a random port.",
+        )
+        
+        # Encode prefill disaggregation
+        parser.add_argument(
+            "--mm-only",
+            action='store_true'
+        )
+        
+        parser.add_argument(
+            "--language-only",
+            action='store_true'
         )
 
         # Quantization and data type

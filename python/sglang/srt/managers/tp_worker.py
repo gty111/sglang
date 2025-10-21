@@ -90,6 +90,7 @@ class TpModelWorker:
                 else server_args.speculative_draft_model_revision
             ),
             is_draft_model=is_draft_worker,
+            
         )
 
         self.model_runner = ModelRunner(

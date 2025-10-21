@@ -93,6 +93,8 @@ class ModelConfig:
         ] = None,  # TODO: remove this, it is not a model config
         model_impl: Union[str, ModelImpl] = ModelImpl.AUTO,
         sampling_defaults: str = "openai",
+        mm_only: bool = False,
+        language_only: bool = False,
     ) -> None:
         # Parse args
         self.model_path = model_path
@@ -197,6 +199,9 @@ class ModelConfig:
         self.image_token_id = getattr(
             self.hf_config, "image_token_id", None
         ) or getattr(self.hf_config, "image_token_index", None)
+        
+        self.hf_config.mm_only = mm_only
+        self.hf_config.language_only = language_only
 
     @staticmethod
     def from_server_args(
@@ -219,6 +224,8 @@ class ModelConfig:
             hybrid_kvcache_ratio=server_args.hybrid_kvcache_ratio,
             model_impl=server_args.model_impl,
             sampling_defaults=server_args.sampling_defaults,
+            language_only=server_args.language_only,
+            mm_only=server_args.mm_only,
             **kwargs,
         )
 

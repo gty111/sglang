@@ -163,7 +163,6 @@ class ImageEncoder:
             )
 
         self.context = zmq.asyncio.Context(2)
-        self.send_to_prefill_sockets = dict()
 
         import_processors("sglang.srt.multimodal.processors")
         self.processor_cls = get_mm_processor_cls(self.model_config.hf_config)
@@ -236,17 +235,13 @@ class ImageEncoder:
             mm_data.embedding_list[mm_data.part_idx] = None
 
         # Send ack/data
-        if prefill_url in self.send_to_prefill_sockets:
-            socket = self.send_to_prefill_sockets[prefill_url]
-        else:
-            embedding_port = await self.get_embedding_port(prefill_url)
-            socket = get_zmq_socket(
-                self.context,
-                zmq.PUSH,
-                f"tcp://{prefill_host}:{embedding_port}",
-                False,
-            )
-            self.send_to_prefill_sockets[prefill_url] = socket
+        embedding_port = await self.get_embedding_port(prefill_url)
+        socket = get_zmq_socket(
+            self.context,
+            zmq.PUSH,
+            f"tcp://{prefill_host}:{embedding_port}",
+            False,
+        )
         socket.send_pyobj(mm_data)
 
     @torch.inference_mode()

@@ -425,6 +425,8 @@ class Scheduler(
 
         # Init running status
         self.waiting_queue: List[Req] = []
+
+        self.waiting_image_list: List = []
         # The running decoding batch for continuous batching
         self.running_batch: ScheduleBatch = ScheduleBatch(reqs=[], batch_is_full=False)
         # The current forward batch
@@ -985,8 +987,10 @@ class Scheduler(
     def event_loop_normal(self):
         """A normal scheduler loop."""
         while True:
+
             recv_reqs = self.recv_requests()
             self.process_input_requests(recv_reqs)
+            self.process_waiting_requests()
 
             batch = self.get_next_batch_to_run()
             self.cur_batch = batch
@@ -1014,8 +1018,10 @@ class Scheduler(
             self.process_batch_result(tmp_batch, tmp_result)
 
         while True:
+
             recv_reqs = self.recv_requests()
             self.process_input_requests(recv_reqs)
+            self.process_waiting_requests()
 
             batch = self.get_next_batch_to_run()
             self.cur_batch = batch
@@ -1168,7 +1174,10 @@ class Scheduler(
             self.server_args.language_only
             and self.server_args.mm_transfer_backend == "zmq_to_scheduler"
         ):
-            recv_reqs = self.mm_receiver.process_waiting_requests(recv_reqs)
+            waiting_image_list, recv_reqs = self.mm_receiver.process_waiting_requests(
+                recv_reqs
+            )
+            self.waiting_image_list.extend(waiting_image_list)
 
         for recv_req in recv_reqs:
             # If it is a health check generation request and there are running requests, ignore it.
@@ -1187,6 +1196,29 @@ class Scheduler(
                         self.recv_from_rpc.send_pyobj(output)
                 else:
                     self.send_to_tokenizer.send_output(output, recv_req)
+
+    def process_waiting_requests(
+        self,
+    ) -> None:
+        if not self.waiting_image_list or len(self.waiting_image_list) == 0:
+            return
+        local_statuses = []
+        for waiting_req in self.waiting_image_list:
+            local_statuses.append(1 if waiting_req.ready else 0)
+
+        local_tensor = torch.tensor(local_statuses, dtype=torch.int32)
+
+        if torch.cuda.is_available():
+            local_tensor = local_tensor.cuda()
+
+        torch.distributed.all_reduce(local_tensor, op=torch.distributed.ReduceOp.MIN)
+        new_waiting = []
+        for i, waiting_req in enumerate(self.waiting_image_list):
+            if local_tensor[i].item() == 1:
+                self._request_dispatcher(waiting_req.recv_req)
+            else:
+                new_waiting.append(waiting_req)
+        self.waiting_image_list = new_waiting
 
     def init_req_max_new_tokens(self, req):
         req.sampling_params.max_new_tokens = min(

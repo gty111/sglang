@@ -255,12 +255,14 @@ class MMReceiver:
         hf_config=None,
         pp_rank=None,
         tp_rank=None,
+        tp_cpu_group=None,
     ):
         self.context = zmq.asyncio.Context(20)
         self.mm_transfer_backend = server_args.mm_transfer_backend
         self.encode_urls = server_args.encode_urls
         self.encode_idx = list(range(len(self.encode_urls)))
         self.host = server_args.host
+        self.tp_cpu_group = tp_cpu_group
         if self.mm_transfer_backend == "mooncake":
             self.dtype = dtype
             self.embeddings_engine = MooncakeTransferEngine(
@@ -276,6 +278,7 @@ class MMReceiver:
             self.nnodes = server_args.nnodes
             self.hostname = get_local_ip_auto()
             self.world_size = server_args.pp_size * server_args.tp_size
+            self.waiting_list: List[WaitingImageRequest] = []
             if hf_config is not None:
                 transport_mode = _determine_tensor_transport_mode(server_args)
                 import_processors("sglang.srt.multimodal.processors")
@@ -309,8 +312,7 @@ class MMReceiver:
 
     # For zmq_to_scheduler
     def process_waiting_requests(self, recv_reqs):
-        waiting_image_list: List[WaitingImageRequest] = []
-        normal_list: List = []
+        new_requests = []
         for recv_req in recv_reqs:
             # E Disaggregation
             if (
@@ -332,10 +334,30 @@ class MMReceiver:
                     embedding_port=embedding_port,
                 )
                 waiting_req.start_receiving()
-                waiting_image_list.append(waiting_req)
+                self.waiting_list.append(waiting_req)
             else:
-                normal_list.append(recv_req)
-        return waiting_image_list, normal_list
+                new_requests.append(recv_req)
+
+        if len(self.waiting_list) == 0:
+            return new_requests
+
+        local_status = []
+        for waiting_req in self.waiting_list:
+            local_status.append(waiting_req.ready)
+        local_tensor = torch.tensor(local_status, dtype=torch.int32)
+        torch.distributed.all_reduce(
+            local_tensor, op=torch.distributed.ReduceOp.MIN, group=self.tp_cpu_group
+        )
+
+        new_waiting = []
+        for i, waiting_req in enumerate(self.waiting_list):
+            if local_status[i]:
+                new_requests.append(waiting_req.recv_req)
+            else:
+                new_waiting.append(waiting_req)
+
+        self.waiting_list = new_waiting
+        return new_requests
 
     # For zmq_to_scheduler
     def _run_encode_in_thread(

@@ -3,6 +3,7 @@ import logging
 import pickle
 import random
 import threading
+import time
 import uuid
 from typing import List
 
@@ -112,6 +113,10 @@ class WaitingImageRequest:
         self.recv_embedding_data = None
         self.ready = False
 
+        self.thread = None
+        self._started = False
+        self._cleaned = False
+
     def send_encode_request(self):
         async def _send_single_request(session, url, payload):
             try:
@@ -195,6 +200,48 @@ class WaitingImageRequest:
         self.recv_req.mm_inputs = mm_inputs
         self.recv_req.input_ids = mm_inputs["input_ids"]
         self.ready = True
+
+    def start_receiving(self):
+        if self._started:
+            return
+
+        self.thread = threading.Thread(
+            target=self._receive_loop, name=f"recv-{self.rid}", daemon=True
+        )
+        self.thread.start()
+        self._started = True
+
+    def _receive_loop(self):
+        while not self.ready and self.error is None:
+            try:
+                self._try_recv_mm_data()
+                if not self.ready:
+                    time.sleep(0.01)  # 1ms
+            except Exception as e:
+                logger.exception(f"[{self.rid}] Error")
+                self.error = str(e)
+                break
+
+    def cleanup(self):
+        if self._cleaned:
+            return
+
+        logger.debug(f"[{self.rid}] Cleaning up...")
+
+        try:
+            if hasattr(self, "recv_socket") and self.recv_socket:
+                self.recv_socket.close()
+        except Exception as e:
+            logger.warning(f"[{self.rid}] Error closing socket: {e}")
+
+        try:
+            if hasattr(self, "context") and self.context:
+                self.context.term()
+        except Exception as e:
+            logger.warning(f"[{self.rid}] Error terminating context: {e}")
+
+        self._cleaned = True
+        logger.debug(f"[{self.rid}] Cleanup done")
 
 
 def _determine_tensor_transport_mode(server_args):
@@ -295,6 +342,7 @@ class MMReceiver:
                 if recv_req.embedding_ports is None:
                     waiting_req.send_encode_request()
                 self.waiting_list.append(waiting_req)
+                waiting_req.start_receiving()
             else:
                 new_recv_reqs.append(recv_req)
 
@@ -303,7 +351,6 @@ class MMReceiver:
 
         local_status = []
         for waiting_req in self.waiting_list:
-            waiting_req._try_recv_mm_data()
             local_status.append(waiting_req.ready)
 
         local_status = torch.tensor(local_status, device="cuda", dtype=torch.int32)
@@ -314,6 +361,7 @@ class MMReceiver:
         for i, waiting_req in enumerate(self.waiting_list):
             if local_status[i].item():
                 new_recv_reqs.append(waiting_req.recv_req)
+                waiting_req.cleanup()
             else:
                 new_waiting.append(waiting_req)
 

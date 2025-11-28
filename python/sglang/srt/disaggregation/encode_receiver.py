@@ -92,6 +92,8 @@ class WaitingImageRequest:
         host_name,
         receive_count,
         embedding_port=None,
+        device=None,
+        gpu_id=None,
     ):
         self.rid = rid
         self.recv_req = recv_req
@@ -112,6 +114,9 @@ class WaitingImageRequest:
         logger.info(f"Waiting for input {self.embedding_port = }")
         self.recv_embedding_data = None
         self.ready = False
+
+        self.device = device
+        self.gpu_id = gpu_id
 
         self.thread = None
         self._started = False
@@ -212,11 +217,12 @@ class WaitingImageRequest:
         self._started = True
 
     def _receive_loop(self):
+        torch.get_device_module(self.device).set_device(self.gpu_id)
         while not self.ready and self.error is None:
             try:
                 self._try_recv_mm_data()
                 if not self.ready:
-                    time.sleep(0.01)  # 1ms
+                    time.sleep(0.001)  # 1ms
             except Exception as e:
                 logger.exception(f"[{self.rid}] Error")
                 self.error = str(e)
@@ -263,6 +269,8 @@ class MMReceiver:
         hf_config=None,
         pp_rank=None,
         tp_rank=None,
+        device=None,
+        gpu_id=None,
     ):
         self.context = zmq.asyncio.Context(20)
         self.mm_transfer_backend = server_args.mm_transfer_backend
@@ -284,6 +292,8 @@ class MMReceiver:
             self.nnodes = server_args.nnodes
             self.hostname = get_local_ip_auto()
             self.world_size = server_args.pp_size * server_args.tp_size
+            self.device = device
+            self.gpu_id = gpu_id
             self.waiting_list: List[WaitingImageRequest] = []
             if hf_config is not None:
                 transport_mode = _determine_tensor_transport_mode(server_args)
@@ -338,6 +348,8 @@ class MMReceiver:
                     host_name=self.hostname,
                     receive_count=self.world_size,
                     embedding_port=embedding_port,
+                    device=self.device,
+                    gpu_id=self.gpu_id,
                 )
                 if recv_req.embedding_ports is None:
                     waiting_req.send_encode_request()

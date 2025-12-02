@@ -70,13 +70,13 @@ class TensorWrapper:
 
 
 def _convert(data):
-    if type(data) == torch.Tensor:
+    if isinstance(data, torch.Tensor):
         return data
-    elif type(data) == np.ndarray:
+    elif isinstance(data, np.ndarray):
         return torch.tensor(data)
-    elif type(data) == list and type(data[0]) == np.ndarray:
+    elif isinstance(data, list) and isinstance(data[0], np.ndarray):
         return torch.tensor(np.array(data))
-    elif type(data) == list and type(data[0]) in [int, float]:
+    elif isinstance(data, list) and isinstance(data[0], (int, float)):
         return torch.tensor(data)
     else:
         return data
